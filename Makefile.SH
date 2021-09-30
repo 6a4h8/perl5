@@ -298,7 +298,6 @@ DLSUFFIX = .$dlext
 PLDLFLAGS = $pldlflags
 LIBPERL = $libperl
 LLIBPERL= $linklibperl
-LLIBPERL_NONSHR= $linklibperl_nonshr
 SHRPENV = $shrpenv
 
 # Static targets are ordinarily built without CCCDLFLAGS.  However,
@@ -801,7 +800,6 @@ esac
 case "$osname" in
 aix)
 	$spitshell >>$Makefile <<!GROK!THIS!
-LIBS			= $perllibs
 # In AIX we need to change this for building Perl itself from
 # its earlier definition (which is for building external
 # extensions *after* Perl has been built and installed)
@@ -812,19 +810,6 @@ CCDLFLAGS		= `echo $ccdlflags|sed -e 's@-bE:.*/perl\.exp@-bE:perl.exp@'`
 	define|true|[yY]*)
 		$spitshell >>$Makefile <<'!NO!SUBS!'
 
-LIBPERL_NONSHR		= libperl_nonshr$(LIB_EXT)
-MINIPERL_NONSHR		= miniperl_nonshr$(EXE_EXT)
-
-$(LIBPERL_NONSHR): $(perllib_objs)
-	$(RMS) $(LIBPERL_NONSHR)
-	$(AR) rc $(LIBPERL_NONSHR) $(perllib_objs)
-
-$(MINIPERL_NONSHR): $(LIBPERL_NONSHR) miniperlmain$(OBJ_EXT) opmini$(OBJ_EXT)  perlmini$(OBJ_EXT)
-	$(CC) $(LDFLAGS) -o $(MINIPERL_NONSHR) miniperlmain$(OBJ_EXT) \
-	    opmini$(OBJ_EXT) perlmini$(OBJ_EXT) $(LIBPERL_NONSHR) $(LIBS)
-
-MINIPERLEXP		= $(MINIPERL_NONSHR)
-
 LIBPERLEXPORT		= perl.exp
 
 !NO!SUBS!
@@ -832,7 +817,6 @@ LIBPERLEXPORT		= perl.exp
 		;;
 	*)	
 		$spitshell >>$Makefile <<'!NO!SUBS!'
-MINIPERLEXP		= $(MINIPERL_EXE)
 
 PERLEXPORT		= perl.exp
 
@@ -840,8 +824,8 @@ PERLEXPORT		= perl.exp
 	;;
 	esac
 	$spitshell >>$Makefile <<'!NO!SUBS!'
-perl.exp: $(MINIPERLEXP) makedef.pl $(CONFIGPM) $(SYM) $(SYMH)
-	./$(MINIPERLEXP) -Ilib makedef.pl --sort-fold PLATFORM=aix CC_FLAGS="$(OPTIMIZE)" > perl.exp
+perl.exp: $(MINIPERL_EXE) makedef.pl $(CONFIGPM) $(SYM) $(SYMH)
+	$(MINIPERL) makedef.pl --sort-fold PLATFORM=aix CC_FLAGS="$(OPTIMIZE)" > perl.exp
 
 !NO!SUBS!
 	;;
@@ -850,7 +834,7 @@ os2)
 MINIPERLEXP		= miniperl
 
 perl5.def: $(MINIPERLEXP) makedef.pl $(CONFIGPM) $(SYM) $(SYMH) miniperl.map
-	./$(MINIPERLEXP) -Ilib makedef.pl PLATFORM=os2 -DPERL_DLL=$(PERL_DLL) CC_FLAGS="$(OPTIMIZE)" > perl5.def
+	$(MINIPERL) makedef.pl PLATFORM=os2 -DPERL_DLL=$(PERL_DLL) CC_FLAGS="$(OPTIMIZE)" > perl5.def
 
 !NO!SUBS!
 	;;
@@ -1408,7 +1392,7 @@ _cleaner2:
 	rm -rf pod/perlfunc pod/perlipc
 	-rmdir ext/B/lib
 	-rm -f dist/Time-HiRes/xdefine
-	rm -f so_locations $(LIBPERL_NONSHR) $(MINIPERL_NONSHR)
+	rm -f so_locations $(LIBPERL_NONSHR)
 	-rmdir lib/version lib/threads lib/inc/ExtUtils lib/inc lib/encoding
 	-rmdir lib/autodie/exception lib/autodie/Scope lib/autodie lib/XS
 	-rmdir lib/Win32API lib/VMS lib/Unicode/Collate/Locale
