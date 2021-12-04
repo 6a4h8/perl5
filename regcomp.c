@@ -5188,7 +5188,7 @@ S_study_chunk(pTHX_ RExC_state_t *pRExC_state, regnode **scanp,
                         (is_inf_internal || is_inf || (data && data->flags & SF_IS_INF))
                         &&
                         ( (flags & (SCF_DO_STCLASS | SCF_DO_SUBSTR)) == 0 )
-                    )
+                    ), TRUE
                 ) {
                     /* no need to do anything here if we are in a define. */
                     /* or we are after some kind of infinite construct

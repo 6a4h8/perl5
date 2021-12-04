@@ -8428,7 +8428,13 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
             n = ARG(scan);
             /* this does not need to use EVAL_CLOSE_PAREN macros, as the arg
              * of SCAN is already set up as matches a eval.close_paren */
-            sw = cur_eval && (n == 0 || CUR_EVAL.close_paren == n);
+            regmatch_state* cur_eval_inner = cur_eval;
+            while (cur_eval_inner)
+                if (sw = cur_eval_inner->u.eval.close_paren == n) break;
+                else cur_eval_inner = cur_eval_inner->u.eval.prev_eval;
+
+            sw = sw || n == 0;
+            
             break;
 
         case DEFINEP:  /*  (?(DEFINE))  */
