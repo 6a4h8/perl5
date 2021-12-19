@@ -4445,8 +4445,8 @@ S_reg_check_named_buff_matched(const regexp *rex, const regnode *scan)
 
     PERL_ARGS_ASSERT_REG_CHECK_NAMED_BUFF_MATCHED;
 
-    for ( n=0; n<SvIVX(sv_dat); n++ ) {
-        if ((I32)rex->lastparen >= nums[n] &&
+    for ( n=SvIVX(sv_dat); n--; ) {
+        if (rex->offs[nums[n]].start != -1 &&
             rex->offs[nums[n]].end != -1)
         {
             return nums[n];

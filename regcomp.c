@@ -8615,9 +8615,8 @@ Perl_reg_named_buff_fetch(pTHX_ REGEXP * const r, SV * const namesv,
             SV* sv_dat=HeVAL(he_str);
             I32 *nums=(I32*)SvPVX(sv_dat);
             AV * const retarray = (flags & RXapif_ALL) ? newAV() : NULL;
-            for ( i=0; i<SvIVX(sv_dat); i++ ) {
-                if ((I32)(rx->nparens) >= nums[i]
-                    && rx->offs[nums[i]].start != -1
+            for ( i=SvIVX(sv_dat); i--; ) {
+                if (rx->offs[nums[i]].start != -1
                     && rx->offs[nums[i]].end != -1)
                 {
                     ret = newSVpvs("");
