@@ -424,6 +424,11 @@ S_regcp_restore(pTHX_ regexp *rex, I32 ix, U32 *maxopenparen_p _pDEPTH)
 }
 
 #define regcpblow(cp) LEAVE_SCOPE(cp)	/* Ignores regcppush()ed data. */
+#define clearmatches(rex) memset((rex)->offs, -1, sizeof(*(rex)->offs) * ((rex)->nparens + 1))
+#define regcprestore(isnosave, cp)     /* If no save only restore maxopenparen. */ \
+                        if (!isnosave)\
+                            clearmatches(rex),\
+                            regcp_restore(rex, (cp), &maxopenparen)
 
 STATIC bool
 S_isFOO_lc(pTHX_ const U8 classnum, const U8 character)
@@ -7881,8 +7886,18 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
             regexp_internal *rei;
             regnode *startpoint;
             U32 arg;
+            bool clearmatches;
 
+        case GOSUBSS:
+            if (clearmatches = TRUE) ST.isnosave = FALSE;
+            else {
         case GOSUB: /*    /(...(?1))/   /(...(?&foo))/   */
+                if (ST.isnosave = TRUE);
+                else
+        case GOSUBS:
+                    ST.isnosave = FALSE;
+                clearmatches = FALSE;
+            }
             arg= (U32)ARG(scan);
             if (cur_eval && cur_eval->locinput == locinput) {
                 if ( ++nochange_depth > max_nochange_depth )
@@ -7927,6 +7942,8 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
             /* Save all the positions seen so far. */
             ST.cp = regcppush(rex, 0, maxopenparen);
             REGCP_SET(ST.lastcp);
+
+            !clearmatches || clearmatches(rex);
 
             /* and then jump to the code we share with EVAL */
             goto eval_recurse_doit;
@@ -8156,7 +8173,7 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
                  * in the regexp code uses the pad ! */
                 PL_op = oop;
                 PL_curcop = ocurcop;
-                regcp_restore(rex, ST.lastcp, &maxopenparen);
+                regcprestore(CUR_EVAL.isnosave, ST.lastcp);
                 PL_curpm_under = PL_curpm;
                 PL_curpm = PL_reg_curpm;
 
@@ -8232,6 +8249,7 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
                 REGCP_SET(ST.lastcp);
                 /* and set maxopenparen to 0, since we are starting a "fresh" match */
                 maxopenparen = 0;
+                clearmatches(rex);
                 /* run the pattern returned from (??{...}) */
 
               eval_recurse_doit: /* Share code with GOSUB below this line
@@ -9391,7 +9409,7 @@ NULL
 
                 /* Restore parens of the outer rex without popping the
                  * savestack */
-                regcp_restore(rex, CUR_EVAL.lastcp, &maxopenparen);
+                regcprestore(CUR_EVAL.isnosave, CUR_EVAL.lastcp);
 
                 st->u.eval.prev_eval = cur_eval;
                 cur_eval = CUR_EVAL.prev_eval;
