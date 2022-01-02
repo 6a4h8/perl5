@@ -831,6 +831,7 @@ typedef struct regmatch_state {
             U32         close_paren; /* which close bracket is our end (+1) */
             regnode	*B;	/* the node following us  */
             char        *prev_recurse_locinput;
+            bool        isnosave;
         } eval;
 
         struct {

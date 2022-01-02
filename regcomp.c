@@ -5163,7 +5163,7 @@ S_study_chunk(pTHX_ RExC_state_t *pRExC_state, regnode **scanp,
             } else			/* single branch is optimized. */
                 scan = NEXTOPER(scan);
             continue;
-        } else if (OP(scan) == SUSPEND || OP(scan) == GOSUB) {
+        } else if (OP(scan) == SUSPEND || PL_regkind[OP(scan)] == GOSUBG) {
             I32 paren = 0;
             regnode *start = NULL;
             regnode *end = NULL;
@@ -5280,7 +5280,7 @@ S_study_chunk(pTHX_ RExC_state_t *pRExC_state, regnode **scanp,
                 newframe->prev_recursed_depth = recursed_depth;
                 newframe->this_prev_frame= frame;
                 newframe->in_gosub = (
-                    (frame && frame->in_gosub) || OP(scan) == GOSUB
+                    (frame && frame->in_gosub) || PL_regkind[OP(scan)] == GOSUBG
                 );
 
                 DEBUG_STUDYDATA("frame-new", data, depth, is_inf);
@@ -8518,7 +8518,7 @@ Perl_re_op_compile(pTHX_ SV ** const patternp, int pat_count,
          * an if(scan) to guard the ARG2L_SET() - Yves
          *
          */
-        assert(scan && OP(scan) == GOSUB);
+        assert(scan && PL_regkind[OP(scan)] == GOSUBG);
         ARG2L_SET( scan, RExC_open_parens[ARG(scan)] - REGNODE_OFFSET(scan));
     }
 
@@ -8623,8 +8623,10 @@ Perl_reg_named_buff_fetch(pTHX_ REGEXP * const r, SV * const namesv,
                     CALLREG_NUMBUF_FETCH(r, nums[i], ret);
                     if (!retarray)
                         return ret;
-                } else {
-                    if (retarray)
+                } else if (retarray) {
+                    if (rx->offs[nums[i]].start_tmp != -1)
+                        ret = newSViv(rx->offs[nums[i]].start_tmp);
+                    else
                         ret = newSVsv(&PL_sv_undef);
                 }
                 if (retarray)
@@ -8756,9 +8758,8 @@ Perl_reg_named_buff_all(pTHX_ REGEXP * const r, const U32 flags)
             IV parno = 0;
             SV* sv_dat = HeVAL(temphe);
             I32 *nums = (I32*)SvPVX(sv_dat);
-            for ( i = 0; i < SvIVX(sv_dat); i++ ) {
-                if ((I32)(rx->lastparen) >= nums[i] &&
-                    rx->offs[nums[i]].start != -1 &&
+            for ( i = SvIVX(sv_dat); i--; ) {
+                if (rx->offs[nums[i]].start != -1 &&
                     rx->offs[nums[i]].end != -1)
                 {
                     parno = nums[i];
@@ -11566,6 +11567,7 @@ S_reg(pTHX_ RExC_state_t *pRExC_state, I32 paren, I32 *flagp, U32 depth)
             const char non_existent_group_msg[]
                                             = "Reference to nonexistent group";
             const char impossible_group[] = "Invalid reference to group";
+            U8 gosubop = GOSUBS;
 
             if (has_intervening_patws) {
                 RExC_parse++;
@@ -11752,7 +11754,18 @@ S_reg(pTHX_ RExC_state_t *pRExC_state, I32 paren, I32 *flagp, U32 depth)
                 /*notreached*/
             /* named and numeric backreferences */
             case '&':            /* (?&NAME) */
-                parse_start = RExC_parse - 1;
+                for (U32 i = 0; i < 2; ++i)
+                    if (*RExC_parse != '&') {
+                        parse_start = RExC_parse - 1;
+                        break;
+                    }
+                    else
+                        parse_start = RExC_parse, ++RExC_parse, ++gosubop;
+                if (*RExC_parse == ')') {
+                    ret = reg2Lanode(pRExC_state, gosubop, 0, -1);
+                    nextchar(pRExC_state);
+                    return ret;
+                }
               named_recursion:
                 {
                     SV *sv_dat = reg_scan_name(pRExC_state,
@@ -11886,7 +11899,7 @@ S_reg(pTHX_ RExC_state_t *pRExC_state, I32 paren, I32 *flagp, U32 depth)
                    We have to defer the actual calculation until much later
                    as the regop may move.
                  */
-                ret = reg2Lanode(pRExC_state, GOSUB, num, RExC_recurse_count);
+                ret = reg2Lanode(pRExC_state, gosubop, num, RExC_recurse_count);
                 RExC_recurse_count++;
                 DEBUG_OPTIMISE_MORE_r(Perl_re_printf( aTHX_
                     "%*s%*s Recurse #%" UVuf " to %" IVdf "\n",
@@ -21488,7 +21501,7 @@ Perl_regprop(pTHX_ const regexp *prog, SV *sv, const regnode *o, const regmatch_
                     PERL_PV_ESCAPE_UNI_DETECT|PERL_PV_PRETTY_NOCLEAR|PERL_PV_PRETTY_ELLIPSES|PERL_PV_PRETTY_QUOTE );
             }
         }
-    } else if (k == GOSUB) {
+    } else if (PL_regkind[k] == GOSUBG) {
         AV *name_list= NULL;
         if ( RXp_PAREN_NAMES(prog) ) {
             name_list= MUTABLE_AV(progi->data->data[progi->name_list_idx]);
