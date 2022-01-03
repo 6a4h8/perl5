@@ -346,7 +346,7 @@ EOP
 
     my $max_name_width = 0;
     for my $ref (\@ops, \@states) {
-        for my $node ($ref->@*) {
+        for my $node (@{$ref}) {
             my $len = length $node->{name};
             $max_name_width = $len if $max_name_width < $len;
         }

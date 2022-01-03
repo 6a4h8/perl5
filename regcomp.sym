@@ -261,7 +261,9 @@ RENUM       BRANCHJ,    off 1 . 1 ; Group with independently numbered parens.
 #*Regex Subroutines
 GOSUBS      GOSUBG,      num/ofs 2L    ; same as below but also save
 GOSUB       GOSUBG,      num/ofs 2L    ; recurse to paren arg1 at (signed) ofs arg2
-GOSUBSS     GOSUBG,      num/ofs 2L    ; same but also clear before the call
+GOSUBSS     GOSUBG,      num/ofs 2L    ; same as GOSUBS but also clear before the call
+GOSUBKS     GOSUBG,      num/ofs 2L    ; same as GOSUBS but also keeps in current context
+GOSUBK      GOSUBG,      num/ofs 2L    ; same as GOSUB but also keeps
 
 #*Special conditionals
 GROUPPN     GROUPPN,    no-sv 1   ; Whether the group matched.

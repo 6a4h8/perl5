@@ -67,6 +67,7 @@ typedef struct regexp_paren_pair {
      *outputs [][a][b]
      * This field is not part of the API.  */
     SSize_t start_tmp;
+    bool isnokeep;
 } regexp_paren_pair;
 
 #  if defined(PERL_IN_REGCOMP_C) || defined(PERL_IN_UTF8_C)
@@ -831,7 +832,7 @@ typedef struct regmatch_state {
             U32         close_paren; /* which close bracket is our end (+1) */
             regnode	*B;	/* the node following us  */
             char        *prev_recurse_locinput;
-            bool        isnosave;
+            SSize_t     keepsingle; //0 - no, -1 = all, >0 nparen
         } eval;
 
         struct {

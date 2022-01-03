@@ -8623,12 +8623,8 @@ Perl_reg_named_buff_fetch(pTHX_ REGEXP * const r, SV * const namesv,
                     CALLREG_NUMBUF_FETCH(r, nums[i], ret);
                     if (!retarray)
                         return ret;
-                } else if (retarray) {
-                    if (rx->offs[nums[i]].start_tmp != -1)
-                        ret = newSViv(rx->offs[nums[i]].start_tmp);
-                    else
-                        ret = newSVsv(&PL_sv_undef);
-                }
+                } else
+                    ret = newSVsv(&PL_sv_undef);
                 if (retarray)
                     av_push(retarray, ret);
             }
@@ -11754,18 +11750,21 @@ S_reg(pTHX_ RExC_state_t *pRExC_state, I32 paren, I32 *flagp, U32 depth)
                 /*notreached*/
             /* named and numeric backreferences */
             case '&':            /* (?&NAME) */
-                for (U32 i = 0; i < 2; ++i)
+            {
+                U32 i = 0;
+
+                for (i = 0; i < 2; ++i)
                     if (*RExC_parse != '&') {
                         parse_start = RExC_parse - 1;
                         break;
                     }
                     else
                         parse_start = RExC_parse, ++RExC_parse, ++gosubop;
-                if (*RExC_parse == ')') {
-                    ret = reg2Lanode(pRExC_state, gosubop, 0, -1);
-                    nextchar(pRExC_state);
-                    return ret;
+                if (*RExC_parse == '+') {
+                    gosubop = GOSUBKS + i;
+                    parse_start = RExC_parse, ++RExC_parse;
                 }
+            }
               named_recursion:
                 {
                     SV *sv_dat = reg_scan_name(pRExC_state,

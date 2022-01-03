@@ -219,7 +219,7 @@ static void S_cleanup_regmatch_info_aux(pTHX_ void *arg);
 static regmatch_state * S_push_slab(pTHX);
 
 #define REGCP_PAREN_ELEMS 3
-#define REGCP_OTHER_ELEMS 3
+#define REGCP_OTHER_ELEMS 4
 #define REGCP_FRAME_ELEMS 1
 /* REGCP_FRAME_ELEMS are not part of the REGCP_OTHER_ELEMS and
  * are needed for the regexp context stack bookkeeping. */
@@ -228,8 +228,9 @@ STATIC CHECKPOINT
 S_regcppush(pTHX_ const regexp *rex, I32 parenfloor, U32 maxopenparen _pDEPTH)
 {
     const int retval = PL_savestack_ix;
-    const int paren_elems_to_push =
-                (maxopenparen - parenfloor) * REGCP_PAREN_ELEMS;
+    int nparen = maxopenparen - parenfloor;
+    const int beginp = nparen > 0 ? maxopenparen : parenfloor + 1;
+    const int paren_elems_to_push = abs(nparen) * REGCP_PAREN_ELEMS;
     const UV total_elems = paren_elems_to_push + REGCP_OTHER_ELEMS;
     const UV elems_shifted = total_elems << SAVE_TIGHT_SHIFT;
     I32 p;
@@ -260,7 +261,8 @@ S_regcppush(pTHX_ const regexp *rex, I32 parenfloor, U32 maxopenparen _pDEPTH)
                 PTR2UV(rex->offs)
             );
     );
-    for (p = parenfloor+1; p <= (I32)maxopenparen;  p++) {
+    nparen = abs(nparen);
+    for (p = beginp; nparen--; --p) {
 /* REGCP_PARENS_ELEMS are pushed per pairs of parentheses. */
         SSPUSHIV(rex->offs[p].end);
         SSPUSHIV(rex->offs[p].start);
@@ -275,6 +277,7 @@ S_regcppush(pTHX_ const regexp *rex, I32 parenfloor, U32 maxopenparen _pDEPTH)
         ));
     }
 /* REGCP_OTHER_ELEMS are pushed in any case, parentheses or no. */
+    SSPUSHINT(beginp);
     SSPUSHINT(maxopenparen);
     SSPUSHINT(rex->lastparen);
     SSPUSHINT(rex->lastcloseparen);
@@ -282,6 +285,9 @@ S_regcppush(pTHX_ const regexp *rex, I32 parenfloor, U32 maxopenparen _pDEPTH)
 
     return retval;
 }
+
+#define regcppush2(a,b,c, maxopenparen)	S_regcppush(aTHX_ a,b,c _aDEPTH), \
+        PL_savestack[PL_savestack_ix - REGCP_OTHER_ELEMS].any_i32 = (I32)(maxopenparen)
 
 /* These are needed since we do not localize EVAL nodes: */
 #define REGCP_SET(cp)                                           \
@@ -337,7 +343,6 @@ S_regcppush(pTHX_ const regexp *rex, I32 parenfloor, U32 maxopenparen _pDEPTH)
     rex->lastparen = n;                     \
     rex->lastcloseparen = lcp;
 
-
 STATIC void
 S_regcppop(pTHX_ regexp *rex, U32 *maxopenparen_p _pDEPTH)
 {
@@ -366,15 +371,21 @@ S_regcppop(pTHX_ regexp *rex, U32 *maxopenparen_p _pDEPTH)
                 PTR2UV(rex->offs)
             );
     );
-    paren = *maxopenparen_p;
+    paren = SSPOPINT;
     for ( ; i > 0; i -= REGCP_PAREN_ELEMS) {
-        SSize_t tmps;
+        regexp_paren_pair tmps = rex->offs[paren];
         rex->offs[paren].start_tmp = SSPOPINT;
         rex->offs[paren].start = SSPOPIV;
-        tmps = SSPOPIV;
-        if (paren <= rex->lastparen)
-            rex->offs[paren].end = tmps;
-        DEBUG_BUFFERS_r( Perl_re_exec_indentf( aTHX_
+        rex->offs[paren].end = SSPOPIV;
+        if (paren > rex->lastparen)
+            rex->offs[paren].end = tmps.end;
+        if (!tmps.isnokeep) {
+            if (tmps.start != -1 && tmps.end != -1)
+                rex->offs[paren].start = tmps.start,
+                rex->offs[paren].end = tmps.end;
+            //rex->offs[paren].isnokeep = -1;
+        }
+        DEBUG_BUFFERS_r(Perl_re_exec_indentf(aTHX_
             "    \\%" UVuf ": %" IVdf "(%" IVdf ")..%" IVdf "%s\n",
             depth,
             (UV)paren,
@@ -396,6 +407,10 @@ S_regcppop(pTHX_ regexp *rex, U32 *maxopenparen_p _pDEPTH)
      * this erroneously leaves $1 defined: "1" =~ /^(?:(\d)x)?\d$/
      * --jhi updated by dapm */
     for (i = rex->lastparen + 1; i <= rex->nparens; i++) {
+        if (!rex->offs[i].isnokeep) {
+            //rex->offs[i].isnokeep = -1;
+            continue;
+        }
         if (i > *maxopenparen_p)
             rex->offs[i].start = -1;
         rex->offs[i].end = -1;
@@ -424,11 +439,6 @@ S_regcp_restore(pTHX_ regexp *rex, I32 ix, U32 *maxopenparen_p _pDEPTH)
 }
 
 #define regcpblow(cp) LEAVE_SCOPE(cp)	/* Ignores regcppush()ed data. */
-#define clearmatches(rex) memset((rex)->offs, -1, sizeof(*(rex)->offs) * ((rex)->nparens + 1))
-#define regcprestore(isnosave, cp)     /* If no save only restore maxopenparen. */ \
-                        if (!(isnosave))\
-                            clearmatches(rex),\
-                            regcp_restore(rex, (cp), &maxopenparen)
 
 STATIC bool
 S_isFOO_lc(pTHX_ const U8 classnum, const U8 character)
@@ -4247,12 +4257,42 @@ S_regtry(pTHX_ regmatch_info *reginfo, char **startposp)
 
     reginfo->cutpoint=NULL;
 
-    clearmatches(prog);
-
     prog->offs[0].start = *startposp - reginfo->strbeg;
     prog->lastparen = 0;
     prog->lastcloseparen = 0;
 
+    /* XXXX What this code is doing here?!!!  There should be no need
+       to do this again and again, prog->lastparen should take care of
+       this!  --ilya*/
+
+    /* Tests pat.t#187 and split.t#{13,14} seem to depend on this code.
+     * Actually, the code in regcppop() (which Ilya may be meaning by
+     * prog->lastparen), is not needed at all by the test suite
+     * (op/regexp, op/pat, op/split), but that code is needed otherwise
+     * this erroneously leaves $1 defined: "1" =~ /^(?:(\d)x)?\d$/
+     * Meanwhile, this code *is* needed for the
+     * above-mentioned test suite tests to succeed.  The common theme
+     * on those tests seems to be returning null fields from matches.
+     * --jhi updated by dapm */
+
+    /* After encountering a variant of the issue mentioned above I think
+     * the point Ilya was making is that if we properly unwind whenever
+     * we set lastparen to a smaller value then we should not need to do
+     * this every time, only when needed. So if we have tests that fail if
+     * we remove this, then it suggests somewhere else we are improperly
+     * unwinding the lastparen/paren buffers. See UNWIND_PARENS() and
+     * places it is called, and related regcp() routines. - Yves */
+#if 1
+    if (prog->nparens) {
+        regexp_paren_pair *pp = prog->offs;
+        I32 i;
+        for (i = prog->nparens; i > (I32)prog->lastparen; i--) {
+            ++pp;
+            pp->start = -1;
+            pp->end = -1;
+        }
+    }
+#endif
     REGCP_SET(lastcp);
     result = regmatch(reginfo, *startposp, progi->program + 1);
     if (result != -1) {
@@ -7859,16 +7899,33 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
             bool clearmatches;
 
         case GOSUBSS:
-            if (clearmatches = TRUE) ST.isnosave = FALSE;
-            else {
+            clearmatches = TRUE;
+            ST.keepsingle = 0;
+            goto gosub_common;
+
+        case GOSUBKS:
+            clearmatches = FALSE;
+            ST.keepsingle = 2;
+
+            goto gosub_common;
+
+        case GOSUBK:
+            clearmatches = FALSE;
+            ST.keepsingle = 1;
+
+            goto gosub_common;
+
         case GOSUB: /*    /(...(?1))/   /(...(?&foo))/   */
-                if (ST.isnosave = TRUE);
-                else
+            clearmatches = FALSE;
+            ST.keepsingle = -1;
+            goto gosub_common;
+
         case GOSUBS:
-                    ST.isnosave = FALSE;
-                clearmatches = FALSE;
-            }
-            arg= (U32)ARG(scan);
+            ST.keepsingle = 0;
+            clearmatches = FALSE;
+
+        gosub_common:
+                arg= (U32)ARG(scan);
             if (cur_eval && cur_eval->locinput == locinput) {
                 if ( ++nochange_depth > max_nochange_depth )
                     Perl_croak(aTHX_
@@ -7890,7 +7947,7 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
              * we recurse and if we try to enter the same routine twice from
              * the same position we throw an error.
              */
-            if ( rex->recurse_locinput[arg] == locinput ) {
+            if ( rex->recurse_locinput[arg] == locinput, FALSE ) {
                 /* FIXME: we should show the regop that is failing as part
                  * of the error message. */
                 Perl_croak(aTHX_ "Infinite recursion in regex");
@@ -7909,17 +7966,25 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
                 });
             }
 
-            /* Save all the positions seen so far. */
-            ST.cp = regcppush(rex, 0, maxopenparen);
-            REGCP_SET(ST.lastcp);
+            if (!clearmatches) {
+                /* Save sub (if any) positions seen so far. */
+                ST.cp = regcppush(rex, 0, maxopenparen);
+                REGCP_SET(ST.lastcp);
+            }
+            else {
+                /* Save all the positions seen so far. */
+                ST.cp = regcppush(rex, 0, rex->nparens);
+                REGCP_SET(ST.lastcp);
 
-            !clearmatches || clearmatches(rex);
+                memset(rex->offs + 1, -1, sizeof(*(rex)->offs)* (rex->nparens - 1));
+            }
 
             /* and then jump to the code we share with EVAL */
             goto eval_recurse_doit;
             /* NOTREACHED */
 
         case EVAL:  /*   /(?{...})B/   /(??{A})B/  and  /(?(?{...})X|Y)B/   */
+            ST.keepsingle = 0;
             if (logical == 2 && cur_eval && cur_eval->locinput==locinput) {
                 if ( ++nochange_depth > max_nochange_depth )
                     Perl_croak(aTHX_ "EVAL without pos change exceeded limit in regex");
@@ -8143,7 +8208,7 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
                  * in the regexp code uses the pad ! */
                 PL_op = oop;
                 PL_curcop = ocurcop;
-                regcprestore(FALSE, ST.lastcp);
+                regcp_restore(rex, ST.lastcp, &maxopenparen);
                 PL_curpm_under = PL_curpm;
                 PL_curpm = PL_reg_curpm;
 
@@ -8219,9 +8284,7 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
                 REGCP_SET(ST.lastcp);
                 /* and set maxopenparen to 0, since we are starting a "fresh" match */
                 maxopenparen = 0;
-                clearmatches(rex);
                 /* run the pattern returned from (??{...}) */
-
               eval_recurse_doit: /* Share code with GOSUB below this line
                             * At this point we expect the stack context to be
                             * set up correctly */
@@ -8537,11 +8600,6 @@ NULL
             assert(next); /* keep Coverity happy */
             if (OP(PREVOPER(next)) == NOTHING) /* LONGJMP */
                 next += ARG(next);
-
-            /* XXXX Probably it is better to teach regpush to support
-               parenfloor > maxopenparen ... */
-            if (parenfloor > (I32)rex->lastparen)
-                parenfloor = rex->lastparen; /* Pessimization... */
 
             ST.prev_curlyx= cur_curlyx;
             cur_curlyx = st;
@@ -9379,7 +9437,18 @@ NULL
 
                 /* Restore parens of the outer rex without popping the
                  * savestack */
-                regcprestore(CUR_EVAL.isnosave, CUR_EVAL.lastcp);
+                if (CUR_EVAL.keepsingle != -1) {
+                    regexp_paren_pair tmps;
+
+                    if(CUR_EVAL.keepsingle > 0)
+                        tmps = rex->offs[CUR_EVAL.close_paren - 1];
+
+                    regcp_restore(rex, CUR_EVAL.lastcp, &maxopenparen);
+
+                    if (CUR_EVAL.keepsingle > 0)
+                        rex->offs[CUR_EVAL.close_paren - 1] = tmps,
+                        rex->offs[CUR_EVAL.close_paren - 1].isnokeep = CUR_EVAL.keepsingle == 1 ? 0 : -1;
+                }
 
                 st->u.eval.prev_eval = cur_eval;
                 cur_eval = CUR_EVAL.prev_eval;
